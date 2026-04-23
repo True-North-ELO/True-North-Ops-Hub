@@ -1,0 +1,17 @@
+{
+  "logs": [
+    "Testing Project: gen-lang-client-0978318116",
+    "Env Project: undefined",
+    "Testing Database: ai-studio-aeee7f1c-3760-419f-ab07-6f6643818ab1",
+    "Attempting write to SECONDARY database...",
+    "SECONDARY Write FAILED: 7 PERMISSION_DENIED: Cloud Firestore API has not been used in project ais-us-west2-cbfbd7b235734c89b before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=ais-us-west2-cbfbd7b235734c89b then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.",
+    "Attempting write to DEFAULT database...",
+    "FATAL ERROR: 7 PERMISSION_DENIED: Cloud Firestore API has not been used in project ais-us-west2-cbfbd7b235734c89b before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=ais-us-west2-cbfbd7b235734c89b then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.",
+    "Error Code: 7"
+  ],
+  "success": false,
+  "error": {
+    "message": "7 PERMISSION_DENIED: Cloud Firestore API has not been used in project ais-us-west2-cbfbd7b235734c89b before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/firestore.googleapis.com/overview?project=ais-us-west2-cbfbd7b235734c89b then retry. If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.",
+    "code": 7
+  }
+}

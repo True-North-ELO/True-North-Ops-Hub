@@ -1,0 +1,67 @@
+{
+  "entities": {
+    "file": {
+      "title": "Knowledge Document",
+      "description": "A single document within an agent's knowledge base.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Original filename or display name."
+        },
+        "content": {
+          "type": "string",
+          "description": "Extracted text content for the AI to read."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["csv", "pdf", "link-sheet"],
+          "description": "The format of the document."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last synchronization or upload time."
+        },
+        "sourceUrl": {
+          "type": "string",
+          "description": "Original source URL for GDrive synced files."
+        }
+      },
+      "required": ["name", "content", "type", "lastUpdated"]
+    },
+    "contextMetadata": {
+      "title": "Context Metadata",
+      "description": "High-level metadata for an agent's context.",
+      "type": "object",
+      "properties": {
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "customInstructions": {
+          "type": "string",
+          "description": "System instructions override for this specific agent."
+        },
+        "customDescription": {
+          "type": "string",
+          "description": "Public description override for this specific agent."
+        },
+        "folderId": {
+          "type": "string",
+          "description": "Google Drive folder ID linked for automated sync."
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/contexts/{gemId}": {
+      "schema": { "$ref": "contextMetadata" },
+      "description": "Root document for a Gemini agent's context."
+    },
+    "/contexts/{gemId}/files/{fileId}": {
+      "schema": { "$ref": "file" },
+      "description": "Individual documents in the knowledge base."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "True North Ops Hub",
+  "description": "Centralized deployment hub for SOP and RCM Gemini agents, featuring daily automated context updates for peak accuracy.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

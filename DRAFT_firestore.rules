@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global Helpers
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isAdmin() { return isVerified() && request.auth.token.email == "aaron.bombich@truenorthllp.com"; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    // Validation Blueprints
+    function isValidFile(data) {
+      return data.keys().hasAll(['name', 'content', 'type', 'lastUpdated'])
+        && data.keys().size() <= 5
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 256
+        && data.content is string && data.content.size() <= 1048576 // 1MB limit per Firestore doc
+        && data.type in ['csv', 'pdf', 'link-sheet']
+        && (data.get('sourceUrl', null) == null || (data.sourceUrl is string && data.sourceUrl.size() <= 2048));
+    }
+
+    function isValidContextMetadata(data) {
+      return data.keys().hasAll(['lastUpdated']) && data.keys().size() == 1
+        && data.lastUpdated is string;
+    }
+
+    // Contexts Collection
+    match /contexts/{gemId} {
+      allow get: if true; // Public read-only access for agents to operate
+      allow write: if isAdmin() && isValidId(gemId) && isValidContextMetadata(incoming());
+
+      // Files Subcollection
+      match /files/{fileId} {
+        allow list, get: if true; // Public list/read for knowledge base usage
+        allow create, update: if isAdmin() 
+          && isValidId(fileId) 
+          && isValidFile(incoming());
+        allow delete: if isAdmin();
+      }
+    }
+  }
+}

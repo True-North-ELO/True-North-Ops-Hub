@@ -1,0 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Lora", serif;
+  
+  --color-brand-orange: #FF9D42;
+  --color-brand-deep: #E65100;
+  --color-earth: #2D1A12;
+  --color-moss: #FFF1E6;
+  --color-cream: #FDFBFA;
+  --color-sage: #FF9D42; /* Map legacy sage to brand orange */
+
+  @keyframes spin-slow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  --animate-spin-slow: spin-slow 3s linear infinite;
+}
+
+@layer base {
+  body {
+    @apply bg-cream text-earth font-sans;
+  }
+  
+  h1, h2, .serif {
+    @apply font-display;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/60 backdrop-blur-[8px] border border-white/40;
+  }
+  
+  .card-natural {
+    @apply bg-white rounded-3xl border border-stone-100 shadow-sm transition-all duration-300;
+  }
+
+  .dot-sync {
+    @apply h-2 w-2 rounded-full inline-block;
+    animation: pulse 2s infinite;
+  }
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(242, 127, 34, 0.7); }
+  70% { box-shadow: 0 0 0 10px rgba(242, 127, 34, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 127, 34, 0); }
+}
+
