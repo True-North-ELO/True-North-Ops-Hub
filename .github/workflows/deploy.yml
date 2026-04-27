@@ -1,0 +1,61 @@
+# Deploy to GCP Cloud Run
+#
+# Required GitHub Secrets:
+#   GCP_WORKLOAD_IDENTITY_PROVIDER — full Workload Identity provider resource name
+#     (e.g. projects/123456789/locations/global/workloadIdentityPools/my-pool/providers/my-provider)
+#   GCP_SERVICE_ACCOUNT — service account email used for deployments
+#     (e.g. deploy-sa@my-project.iam.gserviceaccount.com)
+#
+# Required GitHub Variables:
+#   GCP_PROJECT_ID — GCP project ID (e.g. my-project-123)
+#   GCP_REGION     — GCP region for Cloud Run (e.g. us-east1)
+
+name: Deploy to Cloud Run
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/true-north-ops-hub/app"
+          docker build -t "${IMAGE}:${{ github.sha }}" -t "${IMAGE}:latest" .
+          docker push "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:latest"
+
+      - name: Deploy to Cloud Run
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/true-north-ops-hub/app:${{ github.sha }}"
+          # Note: Google Secret Manager secret names must exactly match the env var names used here
+          gcloud run deploy true-north-ops-hub \
+            --image "${IMAGE}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --port 3000 \
+            --set-secrets "GEMINI_API_KEY=GEMINI_API_KEY:latest,FIREBASE_SERVICE_ACCOUNT_JSON=FIREBASE_SERVICE_ACCOUNT_JSON:latest,GOOGLE_SERVICE_ACCOUNT_JSON=GOOGLE_SERVICE_ACCOUNT_JSON:latest" \
+            --set-env-vars "NODE_ENV=production"
