@@ -6,6 +6,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import fileUpload, { UploadedFile } from "express-fileupload";
+import rateLimit from "express-rate-limit";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import { initializeApp, getApps } from "firebase-admin/app";
@@ -78,6 +79,14 @@ if (db) db.settings({ ignoreUndefinedProperties: true });
 
 let startupError: any = null;
 
+// Allowlist of permitted hostnames for the single-file URL fetch endpoint (SSRF prevention)
+const ALLOWED_FETCH_HOSTNAMES = new Set([
+  'drive.google.com',
+  'docs.google.com',
+  'sheets.googleapis.com',
+  'storage.googleapis.com',
+]);
+
 async function startServer() {
   const app = express();
   const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -108,6 +117,24 @@ async function startServer() {
       return res.status(401).json({ error: 'Unauthorized: invalid or expired token' });
     }
   };
+
+  // Rate limiter for protected API routes — prevents abuse of auth-gated endpoints
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many requests, please try again later.' },
+  });
+
+  // Stricter limiter for sync/write operations to protect Drive and Firestore quota
+  const syncLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many sync requests, please try again later.' },
+  });
 
   const getGemContext = async (gemId: string) => {
     try {
@@ -362,7 +389,7 @@ async function startServer() {
   };
 
   // Gemini AI proxy — keeps the API key server-side
-  app.post("/api/gemini/chat", requireAuth, async (req, res) => {
+  app.post("/api/gemini/chat", apiLimiter, requireAuth, async (req, res) => {
     if (!geminiAI) {
       return res.status(503).json({ error: "Gemini API not configured on this server" });
     }
@@ -383,7 +410,7 @@ async function startServer() {
     }
   });
 
-  app.get("/api/drive-contents/:folderId", requireAuth, async (req, res) => {
+  app.get("/api/drive-contents/:folderId", syncLimiter, requireAuth, async (req, res) => {
     const { folderId } = req.params;
     
     try {
@@ -515,7 +542,7 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/debug/firebase", requireAuth, async (req, res) => {
+  app.get("/api/debug/firebase", apiLimiter, requireAuth, async (req, res) => {
     try {
       await db.collection('test').doc('ping').set({ time: new Date().toISOString() });
       const snap = await db.collection('test').doc('ping').get();
@@ -559,7 +586,7 @@ async function startServer() {
   }
 
   // Global Sync Trigger (for crons or manual refreshes of all folder-bound gems)
-  app.post("/api/sync-all", requireAuth, async (req, res) => {
+  app.post("/api/sync-all", syncLimiter, requireAuth, async (req, res) => {
     try {
       const contextsSnap = await db.collection('contexts').get();
       const results: any[] = [];
@@ -593,7 +620,7 @@ async function startServer() {
   });
 
   // Update tuning/custom instructions
-  app.post("/api/context/:gemId/tuning", requireAuth, async (req, res) => {
+  app.post("/api/context/:gemId/tuning", apiLimiter, requireAuth, async (req, res) => {
     const { gemId } = req.params;
     const { instructions, description } = req.body;
     try {
@@ -617,7 +644,7 @@ async function startServer() {
   });
 
   // Upload/Update a specific file context
-  app.post("/api/context/:gemId/upload", requireAuth, async (req: any, res) => {
+  app.post("/api/context/:gemId/upload", syncLimiter, requireAuth, async (req: any, res) => {
     const { gemId } = req.params;
     const { type, name } = req.body;
     
@@ -655,7 +682,7 @@ async function startServer() {
   });
 
   // Automation endpoint
-  app.post("/api/context/:gemId", requireAuth, async (req, res) => {
+  app.post("/api/context/:gemId", apiLimiter, requireAuth, async (req, res) => {
     const { gemId } = req.params;
     const { content, filename = 'Auto-Sync Data' } = req.body;
     
@@ -682,7 +709,7 @@ async function startServer() {
   });
 
   // Delete a specific file
-  app.delete("/api/context/:gemId/file/:fileId", requireAuth, async (req, res) => {
+  app.delete("/api/context/:gemId/file/:fileId", apiLimiter, requireAuth, async (req, res) => {
     const { gemId, fileId } = req.params;
     try {
         await deleteFileFromContext(gemId, fileId);
@@ -695,21 +722,13 @@ async function startServer() {
   });
 
   // Fetch from URL (for Google Drive Hooks)
-  app.post("/api/context/:gemId/fetch", requireAuth, async (req, res) => {
+  app.post("/api/context/:gemId/fetch", syncLimiter, requireAuth, async (req, res) => {
     const { gemId } = req.params;
     const { url, name = "GDrive Sync" } = req.body;
 
     if (!url) {
       return res.status(400).json({ error: "URL is required" });
     }
-
-    // Allowlist of permitted hostnames for the single-file fetch path
-    const ALLOWED_FETCH_HOSTNAMES = new Set([
-      'drive.google.com',
-      'docs.google.com',
-      'sheets.googleapis.com',
-      'storage.googleapis.com',
-    ]);
 
     try {
       // Check if this is a folder URL
