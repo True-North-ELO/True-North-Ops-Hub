@@ -1,0 +1,11 @@
+node_modules
+dist
+.env
+*.env
+.env.*
+test_*.ts
+check_*.ts
+trigger_*.ts
+full_sync_*.ts
+db_test_results.json
+.git

@@ -10,6 +10,7 @@ import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 import { initializeApp, getApps } from "firebase-admin/app";
 import firebaseConfig from "./firebase-applet-config.json";
+import { GoogleGenAI } from "@google/genai";
 
 import { google } from "googleapis";
 import { GoogleAuth } from "google-auth-library";
@@ -79,10 +80,34 @@ let startupError: any = null;
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json({ limit: '50mb' }));
   app.use(fileUpload());
+
+  // Gemini AI client (server-side only — key never exposed to the client bundle)
+  const geminiAI = process.env.GEMINI_API_KEY
+    ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+    : null;
+
+  // Auth middleware: verifies Firebase ID token from Authorization header
+  const requireAuth = async (req: any, res: any, next: any) => {
+    const authHeader = req.headers.authorization as string | undefined;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized: missing token' });
+    }
+    const token = authHeader.slice(7);
+    try {
+      if (!adminApp) {
+        return res.status(503).json({ error: 'Auth service unavailable' });
+      }
+      const decoded = await admin.auth().verifyIdToken(token);
+      req.user = decoded;
+      next();
+    } catch {
+      return res.status(401).json({ error: 'Unauthorized: invalid or expired token' });
+    }
+  };
 
   const getGemContext = async (gemId: string) => {
     try {
@@ -336,7 +361,29 @@ async function startServer() {
     await batch.commit();
   };
 
-  app.get("/api/drive-contents/:folderId", async (req, res) => {
+  // Gemini AI proxy — keeps the API key server-side
+  app.post("/api/gemini/chat", requireAuth, async (req, res) => {
+    if (!geminiAI) {
+      return res.status(503).json({ error: "Gemini API not configured on this server" });
+    }
+    const { contents, systemInstruction, temperature, model } = req.body;
+    try {
+      const response = await geminiAI.models.generateContent({
+        model: model || "gemini-3-flash-preview",
+        contents,
+        config: {
+          systemInstruction,
+          temperature: temperature ?? 0.1,
+        },
+      });
+      res.json({ text: response.text });
+    } catch (err: any) {
+      console.error("[Gemini Proxy Error]:", err.message);
+      res.status(500).json({ error: "Gemini API error", details: err.message });
+    }
+  });
+
+  app.get("/api/drive-contents/:folderId", requireAuth, async (req, res) => {
     const { folderId } = req.params;
     
     try {
@@ -468,7 +515,7 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
-  app.get("/api/debug/firebase", async (req, res) => {
+  app.get("/api/debug/firebase", requireAuth, async (req, res) => {
     try {
       await db.collection('test').doc('ping').set({ time: new Date().toISOString() });
       const snap = await db.collection('test').doc('ping').get();
@@ -512,7 +559,7 @@ async function startServer() {
   }
 
   // Global Sync Trigger (for crons or manual refreshes of all folder-bound gems)
-  app.post("/api/sync-all", async (req, res) => {
+  app.post("/api/sync-all", requireAuth, async (req, res) => {
     try {
       const contextsSnap = await db.collection('contexts').get();
       const results: any[] = [];
@@ -546,7 +593,7 @@ async function startServer() {
   });
 
   // Update tuning/custom instructions
-  app.post("/api/context/:gemId/tuning", async (req, res) => {
+  app.post("/api/context/:gemId/tuning", requireAuth, async (req, res) => {
     const { gemId } = req.params;
     const { instructions, description } = req.body;
     try {
@@ -570,7 +617,7 @@ async function startServer() {
   });
 
   // Upload/Update a specific file context
-  app.post("/api/context/:gemId/upload", async (req: any, res) => {
+  app.post("/api/context/:gemId/upload", requireAuth, async (req: any, res) => {
     const { gemId } = req.params;
     const { type, name } = req.body;
     
@@ -608,7 +655,7 @@ async function startServer() {
   });
 
   // Automation endpoint
-  app.post("/api/context/:gemId", async (req, res) => {
+  app.post("/api/context/:gemId", requireAuth, async (req, res) => {
     const { gemId } = req.params;
     const { content, filename = 'Auto-Sync Data' } = req.body;
     
@@ -635,7 +682,7 @@ async function startServer() {
   });
 
   // Delete a specific file
-  app.delete("/api/context/:gemId/file/:fileId", async (req, res) => {
+  app.delete("/api/context/:gemId/file/:fileId", requireAuth, async (req, res) => {
     const { gemId, fileId } = req.params;
     try {
         await deleteFileFromContext(gemId, fileId);
@@ -648,13 +695,21 @@ async function startServer() {
   });
 
   // Fetch from URL (for Google Drive Hooks)
-  app.post("/api/context/:gemId/fetch", async (req, res) => {
+  app.post("/api/context/:gemId/fetch", requireAuth, async (req, res) => {
     const { gemId } = req.params;
     const { url, name = "GDrive Sync" } = req.body;
 
     if (!url) {
       return res.status(400).json({ error: "URL is required" });
     }
+
+    // Allowlist of permitted hostnames for the single-file fetch path
+    const ALLOWED_FETCH_HOSTNAMES = new Set([
+      'drive.google.com',
+      'docs.google.com',
+      'sheets.googleapis.com',
+      'storage.googleapis.com',
+    ]);
 
     try {
       // Check if this is a folder URL
@@ -665,6 +720,20 @@ async function startServer() {
         await db.collection('contexts').doc(gemId).set({ folderId }, { merge: true });
         await syncGoogleDriveFolder(gemId, folderId);
         return res.json({ success: true, isFolder: true, lastUpdated: new Date().toISOString() });
+      }
+
+      // Validate URL before fetching (SSRF prevention)
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        return res.status(400).json({ error: "Invalid URL" });
+      }
+      if (parsedUrl.protocol !== 'https:') {
+        return res.status(400).json({ error: "Only HTTPS URLs are allowed" });
+      }
+      if (!ALLOWED_FETCH_HOSTNAMES.has(parsedUrl.hostname)) {
+        return res.status(400).json({ error: "URL hostname is not permitted. Allowed: drive.google.com, docs.google.com, sheets.googleapis.com, storage.googleapis.com" });
       }
 
       // Handle single file fetch

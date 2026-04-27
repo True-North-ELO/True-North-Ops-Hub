@@ -1,5 +1,4 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, User, Bot, Loader2, Info, BookOpen, ThumbsUp, ThumbsDown, MessageSquare, X, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -8,7 +7,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useFirebase } from './FirebaseProvider';
 import { collection, addDoc, setDoc, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import KnowledgeLibrary from './KnowledgeLibrary';
 
 interface ChatInterfaceProps {
@@ -16,8 +15,6 @@ interface ChatInterfaceProps {
   context: GemContext;
   onOpenFile: (file: any) => void;
 }
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export default function ChatInterface({ config, context, onOpenFile }: ChatInterfaceProps) {
   const { user } = useFirebase();
@@ -90,19 +87,27 @@ export default function ChatInterface({ config, context, onOpenFile }: ChatInter
         6. TONE: Analytical, thorough, and highly accurate.
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          ...messages.map(m => ({ role: m.role, parts: [{ text: m.content }] })),
-          { role: 'user', parts: [{ text: userMessage }] }
-        ],
-        config: {
+      const token = await auth.currentUser?.getIdToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const proxyRes = await fetch('/api/gemini/chat', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: "gemini-3-flash-preview",
+          contents: [
+            ...messages.map(m => ({ role: m.role, parts: [{ text: m.content }] })),
+            { role: 'user', parts: [{ text: userMessage }] }
+          ],
           systemInstruction: fullSystemInstruction,
           temperature: 0.1,
-        }
+        }),
       });
 
-      const modelResponse = response.text || "I'm sorry, I couldn't generate a response.";
+      if (!proxyRes.ok) throw new Error(`Gemini proxy error: ${proxyRes.status}`);
+      const data = await proxyRes.json();
+      const modelResponse = data.text || "I'm sorry, I couldn't generate a response.";
       const modelMessageId = Math.random().toString(36).substring(7);
       setMessages(prev => [...prev, { id: modelMessageId, role: 'model', content: modelResponse }]);
     } catch (err) {

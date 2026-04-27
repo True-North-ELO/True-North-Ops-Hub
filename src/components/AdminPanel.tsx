@@ -8,7 +8,7 @@ import TrueNorthLogo from './TrueNorthLogo';
 import Papa from 'papaparse';
 
 import { setDoc, doc, writeBatch, collection, getDocs, deleteDoc, query, orderBy, limit } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 
 interface AdminPanelProps {
   contexts: Record<GemId, GemContext>;
@@ -17,6 +17,11 @@ interface AdminPanelProps {
 
 export default function AdminPanel({ contexts, onUpdate }: AdminPanelProps) {
   const { user, login, logout, isDbReady } = useFirebase();
+
+  const getAuthHeaders = async (): Promise<Record<string, string>> => {
+    const token = await auth.currentUser?.getIdToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
   const [isUpdating, setIsUpdating] = useState<GemId | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [previewFile, setPreviewFile] = useState<GemFile | null>(null);
@@ -87,7 +92,9 @@ export default function AdminPanel({ contexts, onUpdate }: AdminPanelProps) {
 
     try {
       // 1. Fetch processed contents from server (server has GDrive API Key)
-      const res = await fetch(`/api/drive-contents/${folderId}`);
+      const res = await fetch(`/api/drive-contents/${folderId}`, {
+        headers: await getAuthHeaders(),
+      });
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.error || "Failed to fetch Drive contents");
@@ -215,7 +222,7 @@ export default function AdminPanel({ contexts, onUpdate }: AdminPanelProps) {
     try {
       const response = await fetch(`/api/context/${gemId}/fetch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...await getAuthHeaders() },
         body: JSON.stringify({ url: urlHook.url, name: urlHook.name })
       });
 
@@ -248,6 +255,7 @@ export default function AdminPanel({ contexts, onUpdate }: AdminPanelProps) {
     try {
       const response = await fetch(`/api/context/${gemId}/upload`, {
         method: 'POST',
+        headers: await getAuthHeaders(),
         body: formData
       });
 
