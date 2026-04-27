@@ -17,7 +17,7 @@ service cloud.firestore {
     // Validation Blueprints
     function isValidFile(data) {
       return data.keys().hasAll(['name', 'content', 'type', 'lastUpdated'])
-        && data.keys().size() <= 5
+        && data.keys().size() <= 5 // required (4) + optional sourceUrl = 5 max
         && data.name is string && data.name.size() > 0 && data.name.size() <= 256
         && data.content is string && data.content.size() <= 1048576 // 1MB limit per Firestore doc
         && data.type in ['csv', 'pdf', 'link-sheet']

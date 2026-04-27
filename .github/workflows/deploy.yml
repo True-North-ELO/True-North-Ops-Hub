@@ -52,6 +52,7 @@ jobs:
       - name: Deploy to Cloud Run
         run: |
           IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/true-north-ops-hub/app:${{ github.sha }}"
+          # Note: Google Secret Manager secret names must exactly match the env var names used here
           gcloud run deploy true-north-ops-hub \
             --image "${IMAGE}" \
             --region "${{ vars.GCP_REGION }}" \
